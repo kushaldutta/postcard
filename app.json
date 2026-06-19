@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "postcard",
+    "name": "Postcard",
     "slug": "postcard",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -31,7 +31,14 @@
         {
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#FAF6F0"
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Postcard uses your photos as trip cover images and memories."
         }
       ]
     ],
