@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,10 +18,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { PhotosSection } from '@/components/ui/PhotosSection';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
-import { JournalEntry, TripWithStats } from '@/lib/database.types';
+import { JournalEntry, TripPhoto, TripWithStats } from '@/lib/database.types';
 import { formatDayHeading, formatTripDates } from '@/lib/format';
+import { fetchTripPhotos, groupPhotosByDay } from '@/lib/photos';
 import {
   createJournalEntry,
   fetchJournalEntries,
@@ -36,8 +38,11 @@ export default function TripDetailScreen() {
 
   const [trip, setTrip] = useState<TripWithStats | null>(null);
   const [journals, setJournals] = useState<JournalEntry[]>([]);
+  const [photos, setPhotos] = useState<TripPhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Index into `photos` for the viewer; set from timeline thumbnail taps
+  const [photoViewerIndex, setPhotoViewerIndex] = useState<number | null>(null);
 
   const [showJournalForm, setShowJournalForm] = useState(false);
   const [journalContent, setJournalContent] = useState('');
@@ -52,9 +57,10 @@ export default function TripDetailScreen() {
 
     try {
       setError(null);
-      const [tripData, journalData] = await Promise.all([
+      const [tripData, journalData, photoData] = await Promise.all([
         fetchTrip(id),
         fetchJournalEntries(id),
+        fetchTripPhotos(id),
       ]);
 
       if (!tripData) {
@@ -64,6 +70,7 @@ export default function TripDetailScreen() {
 
       setTrip(tripData);
       setJournals(journalData);
+      setPhotos(photoData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load trip');
     } finally {
@@ -81,6 +88,25 @@ export default function TripDetailScreen() {
   const isOwner = trip?.members.some(
     (m) => m.user_id === user?.id && m.role === 'owner'
   );
+  const isMember = trip?.members.some((m) => m.user_id === user?.id) ?? false;
+
+  const timelineEvents = useMemo(() => {
+    type Event =
+      | { kind: 'journal'; date: string; journal: JournalEntry }
+      | { kind: 'photos'; date: string; photos: TripPhoto[] };
+
+    const events: Event[] = journals.map((j) => ({
+      kind: 'journal',
+      date: j.entry_date,
+      journal: j,
+    }));
+
+    for (const group of groupPhotosByDay(photos)) {
+      events.push({ kind: 'photos', date: group.date, photos: group.photos });
+    }
+
+    return events.sort((a, b) => b.date.localeCompare(a.date));
+  }, [journals, photos]);
 
   const handleAddJournal = async () => {
     if (!journalContent.trim() || !id || !user) return;
@@ -217,6 +243,18 @@ export default function TripDetailScreen() {
           </View>
         </View>
 
+        {user ? (
+          <PhotosSection
+            tripId={trip.id}
+            userId={user.id}
+            canContribute={isMember}
+            photos={photos}
+            onPhotosChange={setPhotos}
+            viewerStartIndex={photoViewerIndex}
+            onViewerDismiss={() => setPhotoViewerIndex(null)}
+          />
+        ) : null}
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Memory Timeline</Text>
@@ -257,25 +295,66 @@ export default function TripDetailScreen() {
             </KeyboardAvoidingView>
           ) : null}
 
-          {journals.length === 0 ? (
+          {timelineEvents.length === 0 ? (
             <View style={styles.emptyTimeline}>
               <Text style={styles.emptyTimelineText}>
-                No memories yet. Add a journal entry to start the story of this trip.
+                No memories yet. Add photos or a journal entry to start the story of this trip.
               </Text>
             </View>
           ) : (
-            journals.map((entry) => (
-              <View key={entry.id} style={styles.timelineItem}>
-                <Text style={styles.timelineDate}>{formatDayHeading(entry.entry_date)}</Text>
-                <View style={styles.timelineCard}>
-                  <Text style={styles.timelineIcon}>✍️ Journal Entry</Text>
-                  <Text style={styles.timelineContent}>{entry.content}</Text>
-                  <Text style={styles.timelineAuthor}>
-                    — {entry.profile?.display_name ?? profile?.display_name ?? 'You'}
-                  </Text>
+            timelineEvents.map((event) =>
+              event.kind === 'journal' ? (
+                <View key={event.journal.id} style={styles.timelineItem}>
+                  <Text style={styles.timelineDate}>{formatDayHeading(event.date)}</Text>
+                  <View style={styles.timelineCard}>
+                    <Text style={styles.timelineIcon}>✍️ Journal Entry</Text>
+                    <Text style={styles.timelineContent}>{event.journal.content}</Text>
+                    <Text style={styles.timelineAuthor}>
+                      — {event.journal.profile?.display_name ?? profile?.display_name ?? 'You'}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            ))
+              ) : (
+                <View key={`photos-${event.date}`} style={styles.timelineItem}>
+                  <Text style={styles.timelineDate}>{formatDayHeading(event.date)}</Text>
+                  <View style={styles.timelineCard}>
+                    <Text style={styles.timelineIcon}>
+                      📸 Added {event.photos.length}{' '}
+                      {event.photos.length === 1 ? 'photo' : 'photos'}
+                    </Text>
+                    <View style={styles.timelinePhotoStrip}>
+                      {event.photos.slice(0, 4).map((photo) => (
+                        <Pressable
+                          key={photo.id}
+                          onPress={() => {
+                            const idx = photos.findIndex((p) => p.id === photo.id);
+                            if (idx >= 0) setPhotoViewerIndex(idx);
+                          }}>
+                          <Image
+                            source={{ uri: photo.public_url }}
+                            style={styles.timelinePhoto}
+                            contentFit="cover"
+                          />
+                        </Pressable>
+                      ))}
+                      {event.photos.length > 4 ? (
+                        <Pressable
+                          onPress={() => {
+                            const idx = photos.findIndex((p) => p.id === event.photos[4].id);
+                            if (idx >= 0) setPhotoViewerIndex(idx);
+                          }}>
+                          <View style={[styles.timelinePhoto, styles.timelinePhotoMore]}>
+                            <Text style={styles.timelinePhotoMoreText}>
+                              +{event.photos.length - 4}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                </View>
+              )
+            )
           )}
         </View>
       </ScrollView>
@@ -470,5 +549,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: theme.colors.textMuted,
     marginTop: theme.spacing.xs,
+  },
+  timelinePhotoStrip: {
+    flexDirection: 'row',
+    gap: theme.spacing.xs,
+    marginTop: theme.spacing.sm,
+  },
+  timelinePhoto: {
+    width: 60,
+    height: 60,
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.surfaceMuted,
+  },
+  timelinePhotoMore: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.accentSoft,
+  },
+  timelinePhotoMoreText: {
+    fontFamily: theme.fonts.bodySemiBold,
+    fontSize: 14,
+    color: theme.colors.accent,
   },
 });

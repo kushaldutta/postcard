@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
+import { SignOutButton } from '@/components/ui/SignOutButton';
 import { theme } from '@/constants/theme';
 
 export default function TabLayout() {
@@ -36,6 +37,7 @@ export default function TabLayout() {
         options={{
           title: 'Trips',
           tabBarIcon: ({ color }) => <Ionicons name="airplane" size={24} color={color} />,
+          headerRight: () => <SignOutButton />,
         }}
       />
       <Tabs.Screen

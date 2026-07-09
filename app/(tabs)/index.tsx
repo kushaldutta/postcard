@@ -101,7 +101,11 @@ export default function TripsScreen() {
           />
         }
         renderItem={({ item }) => (
-          <TripCard trip={item} onPress={() => router.push(`/trip/${item.id}`)} />
+          <TripCard
+            trip={item}
+            onPress={() => router.push(`/trip/${item.id}`)}
+            onEdit={() => router.push(`/trip/edit/${item.id}`)}
+          />
         )}
       />
 

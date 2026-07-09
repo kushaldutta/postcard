@@ -1,8 +1,10 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,17 +18,13 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
-import { createTrip } from '@/lib/trips';
+import { fetchTrip, updateTrip } from '@/lib/trips';
 
 // Parse common date formats into YYYY-MM-DD for Postgres.
-// Accepts: 2026-03-22, 3/22/2026, 3-22-2026, March 22 2026, etc.
 function parseToISODate(input: string): string | undefined {
   const s = input.trim();
   if (!s) return undefined;
-
-  // Already ISO format
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
   const d = new Date(s);
   if (!isNaN(d.getTime())) {
     const yyyy = d.getFullYear();
@@ -34,35 +32,53 @@ function parseToISODate(input: string): string | undefined {
     const dd = String(d.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
   }
-
-  // Try M-D-YYYY or M/D/YYYY
   const parts = s.split(/[-\/]/);
   if (parts.length === 3) {
     const [a, b, c] = parts.map(Number);
     if (c > 1000) {
-      // M-D-YYYY
       const d2 = new Date(c, a - 1, b);
       if (!isNaN(d2.getTime())) {
         return `${c}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`;
       }
     }
   }
-
   return undefined;
 }
 
-export default function NewTripScreen() {
+export default function EditTripScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const router = useRouter();
+
+  const [loadingTrip, setLoadingTrip] = useState(true);
 
   const [destination, setDestination] = useState('');
   const [country, setCountry] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [description, setDescription] = useState('');
-  const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // URI of a newly picked local photo (null = keep existing)
+  const [newCoverPhotoUri, setNewCoverPhotoUri] = useState<string | null>(null);
+  // The current remote cover photo URL from the DB
+  const [existingCoverUrl, setExistingCoverUrl] = useState<string | null>(null);
+
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    fetchTrip(id)
+      .then((trip) => {
+        if (!trip) return;
+        setDestination(trip.destination);
+        setCountry(trip.country ?? '');
+        setStartDate(trip.start_date ?? '');
+        setEndDate(trip.end_date ?? '');
+        setDescription(trip.description ?? '');
+        setExistingCoverUrl(trip.cover_photo_url);
+      })
+      .finally(() => setLoadingTrip(false));
+  }, [id]);
 
   const pickCoverPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -71,44 +87,51 @@ export default function NewTripScreen() {
       aspect: [16, 9],
       quality: 0.8,
     });
-
     if (!result.canceled && result.assets[0]) {
-      setCoverPhotoUri(result.assets[0].uri);
+      setNewCoverPhotoUri(result.assets[0].uri);
     }
   };
 
-  const handleCreate = async () => {
+  const handleSave = async () => {
     if (!destination.trim()) {
       setError('Destination is required.');
       return;
     }
-
-    if (!user) {
-      setError('You must be signed in to create a trip.');
+    if (!user || !id) {
+      setError('Something went wrong. Please try again.');
       return;
     }
 
-    setLoading(true);
+    setSaving(true);
     setError(null);
 
     try {
-      const trip = await createTrip({
+      await updateTrip(id, user.id, {
         destination,
         country,
         startDate: parseToISODate(startDate),
         endDate: parseToISODate(endDate),
         description,
-        coverPhotoUri: coverPhotoUri ?? undefined,
-        createdBy: user.id,
+        coverPhotoUri: newCoverPhotoUri ?? undefined,
       });
-
-      router.replace(`/trip/${trip.id}`);
+      router.back();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create trip');
+      setError(err instanceof Error ? err.message : 'Failed to save changes');
+      Alert.alert('Save failed', err instanceof Error ? err.message : 'Could not save changes');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
+
+  if (loadingTrip) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={theme.colors.accent} />
+      </View>
+    );
+  }
+
+  const coverPreviewUri = newCoverPhotoUri ?? existingCoverUrl;
 
   return (
     <KeyboardAvoidingView
@@ -117,11 +140,20 @@ export default function NewTripScreen() {
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled">
-        <Text style={styles.intro}>Start a new chapter of your travel story.</Text>
+        <Text style={styles.intro}>Update the details for this trip.</Text>
 
         <Pressable onPress={pickCoverPhoto} style={styles.coverPicker}>
-          {coverPhotoUri ? (
-            <Image source={{ uri: coverPhotoUri }} style={styles.coverImage} contentFit="cover" />
+          {coverPreviewUri ? (
+            <>
+              <Image
+                source={{ uri: coverPreviewUri }}
+                style={styles.coverImage}
+                contentFit="cover"
+              />
+              <View style={styles.coverEditBadge}>
+                <Text style={styles.coverEditLabel}>Change photo</Text>
+              </View>
+            </>
           ) : (
             <View style={styles.coverPlaceholder}>
               <Text style={styles.coverEmoji}>📷</Text>
@@ -170,7 +202,7 @@ export default function NewTripScreen() {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Button title="Create Trip" onPress={handleCreate} loading={loading} fullWidth />
+        <Button title="Save Changes" onPress={handleSave} loading={saving} fullWidth />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -179,6 +211,12 @@ export default function NewTripScreen() {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: theme.colors.background,
   },
   container: {
@@ -202,6 +240,20 @@ const styles = StyleSheet.create({
   coverImage: {
     width: '100%',
     height: '100%',
+  },
+  coverEditBadge: {
+    position: 'absolute',
+    bottom: theme.spacing.sm,
+    right: theme.spacing.sm,
+    backgroundColor: 'rgba(20, 16, 12, 0.65)',
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+  },
+  coverEditLabel: {
+    fontFamily: theme.fonts.bodyMedium,
+    fontSize: 13,
+    color: theme.colors.textInverse,
   },
   coverPlaceholder: {
     flex: 1,

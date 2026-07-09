@@ -61,6 +61,14 @@ function RootNavigator() {
             headerShown: true,
           }}
         />
+        <Stack.Screen
+          name="trip/edit/[id]"
+          options={{
+            presentation: 'modal',
+            title: 'Edit Trip',
+            headerShown: true,
+          }}
+        />
       </Stack>
     </>
   );

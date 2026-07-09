@@ -6,7 +6,9 @@ import {
   TripWithStats,
   TimelineItem,
 } from '@/lib/database.types';
+import { fetchTripPhotos, groupPhotosByDay } from '@/lib/photos';
 import { supabase } from '@/lib/supabase';
+import { uploadImageToBucket } from '@/lib/storage';
 
 export type CreateTripInput = {
   destination: string;
@@ -25,22 +27,13 @@ export type UpdateTripInput = Partial<
 };
 
 async function uploadCoverPhoto(userId: string, uri: string): Promise<string | null> {
-  const response = await fetch(uri);
-  const blob = await response.blob();
-  const extension = uri.split('.').pop()?.split('?')[0] ?? 'jpg';
-  const path = `${userId}/${Date.now()}.${extension}`;
-
-  const { error } = await supabase.storage.from('trip-covers').upload(path, blob, {
-    contentType: blob.type || 'image/jpeg',
-    upsert: false,
-  });
-
-  if (error) {
-    throw new Error(error.message);
+  try {
+    const { publicUrl } = await uploadImageToBucket('trip-covers', userId, uri);
+    return publicUrl;
+  } catch (err) {
+    console.warn('Cover photo upload failed, continuing without photo:', err);
+    return null;
   }
-
-  const { data } = supabase.storage.from('trip-covers').getPublicUrl(path);
-  return data.publicUrl;
 }
 
 export async function fetchTrips(): Promise<TripWithStats[]> {
@@ -249,7 +242,11 @@ export async function fetchTimeline(): Promise<TimelineItem[]> {
       });
     }
 
-    const journals = await fetchJournalEntries(trip.id);
+    const [journals, photos] = await Promise.all([
+      fetchJournalEntries(trip.id),
+      fetchTripPhotos(trip.id),
+    ]);
+
     for (const journal of journals) {
       items.push({
         id: `journal-${journal.id}`,
@@ -257,6 +254,16 @@ export async function fetchTimeline(): Promise<TimelineItem[]> {
         date: journal.entry_date,
         trip,
         journal,
+      });
+    }
+
+    for (const group of groupPhotosByDay(photos)) {
+      items.push({
+        id: `photos-${trip.id}-${group.date}`,
+        type: 'photos',
+        date: group.date,
+        trip,
+        photos: group.photos,
       });
     }
   }

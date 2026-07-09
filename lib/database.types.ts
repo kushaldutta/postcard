@@ -51,6 +51,24 @@ export type BucketListItem = {
   created_at: string;
 };
 
+export type TripPhoto = {
+  id: string;
+  trip_id: string;
+  user_id: string;
+  storage_path: string;
+  public_url: string;
+  caption: string | null;
+  taken_on: string;
+  is_favorite: boolean;
+  created_at: string;
+  profile?: Profile;
+};
+
+export type PhotoDayGroup = {
+  date: string;
+  photos: TripPhoto[];
+};
+
 export type TripWithStats = Trip & {
   member_count: number;
   journal_count: number;
@@ -59,8 +77,9 @@ export type TripWithStats = Trip & {
 
 export type TimelineItem = {
   id: string;
-  type: 'trip' | 'journal';
+  type: 'trip' | 'journal' | 'photos';
   date: string;
   trip: Trip;
   journal?: JournalEntry;
+  photos?: TripPhoto[];
 };

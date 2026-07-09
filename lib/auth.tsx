@@ -51,11 +51,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setIsLoading(false);
       }
+    }).catch(() => {
+      setIsLoading(false);
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      // If a token refresh fails (e.g. session expired while the project was
+      // paused), Supabase can't recover the session. Force a clean sign-out so
+      // the app returns to the login screen instead of silently making
+      // unauthenticated (anon) requests.
+      if (event === 'TOKEN_REFRESHED' && !nextSession) {
+        supabase.auth.signOut();
+        setSession(null);
+        setProfile(null);
+        return;
+      }
+
       setSession(nextSession);
       if (nextSession?.user) {
         fetchProfile(nextSession.user.id);

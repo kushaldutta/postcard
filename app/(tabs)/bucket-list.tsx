@@ -5,7 +5,7 @@ export default function BucketListScreen() {
     <EmptyState
       emoji="💌"
       title="Dream destinations"
-      description="Your bucket list is coming soon — a place to collect the adventures you haven't taken yet, with notes on why you want to go."
+      description="Bucket list coming soon! Collect the adventures you haven't taken yet, with notes on why you want to go."
     />
   );
 }

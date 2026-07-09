@@ -35,6 +35,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: false,
   },
+  global: {
+    // Force the native RN fetch instead of whatwg-fetch (cross-fetch polyfill).
+    // The Metro shim (see metro.config.js) also redirects whatwg-fetch imports.
+    fetch,
+  },
 });
 
 export function isSupabaseConfigured(): boolean {

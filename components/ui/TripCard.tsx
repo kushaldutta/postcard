@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -8,9 +9,10 @@ import { formatTripDates, getInitials } from '@/lib/format';
 type TripCardProps = {
   trip: TripWithStats;
   onPress: () => void;
+  onEdit?: () => void;
 };
 
-export function TripCard({ trip, onPress }: TripCardProps) {
+export function TripCard({ trip, onPress, onEdit }: TripCardProps) {
   const location = trip.country ? `${trip.destination}, ${trip.country}` : trip.destination;
 
   return (
@@ -26,6 +28,15 @@ export function TripCard({ trip, onPress }: TripCardProps) {
           </View>
         )}
         <View style={styles.imageOverlay} />
+
+        {onEdit ? (
+          <Pressable
+            onPress={onEdit}
+            hitSlop={8}
+            style={styles.editButton}>
+            <Ionicons name="pencil" size={14} color={theme.colors.textInverse} />
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.content}>
@@ -88,6 +99,17 @@ const styles = StyleSheet.create({
   imageOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(61, 50, 41, 0.08)',
+  },
+  editButton: {
+    position: 'absolute',
+    top: theme.spacing.sm,
+    right: theme.spacing.sm,
+    backgroundColor: 'rgba(20, 16, 12, 0.55)',
+    borderRadius: theme.radius.full,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     padding: theme.spacing.md,
