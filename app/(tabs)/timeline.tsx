@@ -84,7 +84,6 @@ export default function TimelineScreen() {
                 ) : null}
               </>
             ) : (
-              // photos type
               <>
                 <Text style={styles.tripLabel}>{item.trip.destination}</Text>
                 <Text style={styles.journalIcon}>
@@ -108,6 +107,7 @@ export default function TimelineScreen() {
                 </View>
               </>
             )}
+            <Text style={styles.viewTrip}>View trip →</Text>
           </View>
         </Pressable>
       )}
@@ -199,5 +199,12 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.bodySemiBold,
     fontSize: 14,
     color: theme.colors.accent,
+  },
+  viewTrip: {
+    fontFamily: theme.fonts.bodyMedium,
+    fontSize: 13,
+    color: theme.colors.accent,
+    marginTop: theme.spacing.sm,
+    alignSelf: 'flex-end',
   },
 });

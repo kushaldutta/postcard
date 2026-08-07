@@ -1,23 +1,42 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Dimensions,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
 
 import { EmptyState } from '@/components/ui/EmptyState';
 import { theme } from '@/constants/theme';
-import { Trip } from '@/lib/database.types';
+import { getRegionForPins } from '@/lib/geo';
+import { MapPin } from '@/lib/database.types';
 import { formatTripDates } from '@/lib/format';
-import { fetchMapTrips } from '@/lib/trips';
+import { fetchMapPins } from '@/lib/trips';
+
+const MAP_HEIGHT = Dimensions.get('window').height * 0.42;
 
 export default function MapScreen() {
-  const [trips, setTrips] = useState<Trip[]>([]);
+  const router = useRouter();
+  const [pins, setPins] = useState<MapPin[]>([]);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
-      fetchMapTrips()
-        .then(setTrips)
+      setLoading(true);
+      fetchMapPins()
+        .then(setPins)
         .finally(() => setLoading(false));
     }, [])
+  );
+
+  const initialRegion = useMemo(
+    () => getRegionForPins(pins.map((pin) => ({ latitude: pin.latitude, longitude: pin.longitude }))),
+    [pins]
   );
 
   if (loading) {
@@ -28,12 +47,12 @@ export default function MapScreen() {
     );
   }
 
-  if (trips.length === 0) {
+  if (pins.length === 0) {
     return (
       <EmptyState
         emoji="🗺️"
         title="Your map is waiting"
-        description="As you add trips with destinations, they'll appear here — a visual story of everywhere you've been."
+        description="Create a trip with a destination and country — your adventures will appear here as pins on the map."
       />
     );
   }
@@ -41,29 +60,44 @@ export default function MapScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.intro}>
-        A living map of your travels. Full interactive map coming soon — for now, your
-        destinations:
+        Every pin is a chapter of your story. Tap a destination to open the trip.
       </Text>
 
-      <View style={styles.mapPlaceholder}>
-        <Text style={styles.mapEmoji}>🌍</Text>
-        <Text style={styles.mapLabel}>{trips.length} destinations explored</Text>
+      <View style={styles.mapWrapper}>
+        <MapView style={styles.map} initialRegion={initialRegion}>
+          {pins.map((pin) => (
+            <Marker
+              key={pin.trip.id}
+              coordinate={{ latitude: pin.latitude, longitude: pin.longitude }}
+              title={pin.trip.destination}
+              description={pin.trip.country ?? undefined}
+              pinColor={theme.colors.accent}
+              onPress={() => router.push(`/trip/${pin.trip.id}`)}
+            />
+          ))}
+        </MapView>
       </View>
 
+      <Text style={styles.listHeading}>{pins.length} destinations on your map</Text>
+
       <View style={styles.destinations}>
-        {trips.map((trip) => (
-          <View key={trip.id} style={styles.pin}>
+        {pins.map((pin) => (
+          <Pressable
+            key={pin.trip.id}
+            style={({ pressed }) => [styles.pin, pressed && styles.pinPressed]}
+            onPress={() => router.push(`/trip/${pin.trip.id}`)}>
             <View style={styles.pinDot} />
             <View style={styles.pinContent}>
               <Text style={styles.pinDestination}>
-                {trip.destination}
-                {trip.country ? `, ${trip.country}` : ''}
+                {pin.trip.destination}
+                {pin.trip.country ? `, ${pin.trip.country}` : ''}
               </Text>
               <Text style={styles.pinDates}>
-                {formatTripDates(trip.start_date, trip.end_date)}
+                {formatTripDates(pin.trip.start_date, pin.trip.end_date)}
               </Text>
             </View>
-          </View>
+            <Text style={styles.pinChevron}>→</Text>
+          </Pressable>
         ))}
       </View>
     </ScrollView>
@@ -79,7 +113,7 @@ const styles = StyleSheet.create({
   },
   container: {
     padding: theme.spacing.md,
-    gap: theme.spacing.lg,
+    gap: theme.spacing.md,
     paddingBottom: theme.spacing.xxl,
   },
   intro: {
@@ -88,23 +122,21 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
     lineHeight: 22,
   },
-  mapPlaceholder: {
-    height: 200,
-    backgroundColor: theme.colors.accentSoft,
+  mapWrapper: {
+    height: MAP_HEIGHT,
     borderRadius: theme.radius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: theme.colors.border,
-    gap: theme.spacing.sm,
   },
-  mapEmoji: {
-    fontSize: 48,
+  map: {
+    flex: 1,
   },
-  mapLabel: {
-    fontFamily: theme.fonts.bodyMedium,
-    fontSize: 16,
+  listHeading: {
+    fontFamily: theme.fonts.bodySemiBold,
+    fontSize: 14,
     color: theme.colors.secondary,
+    marginTop: theme.spacing.xs,
   },
   destinations: {
     gap: theme.spacing.sm,
@@ -118,6 +150,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
     gap: theme.spacing.md,
+  },
+  pinPressed: {
+    opacity: 0.92,
   },
   pinDot: {
     width: 12,
@@ -138,5 +173,10 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.body,
     fontSize: 13,
     color: theme.colors.textMuted,
+  },
+  pinChevron: {
+    fontFamily: theme.fonts.bodySemiBold,
+    fontSize: 18,
+    color: theme.colors.accent,
   },
 });

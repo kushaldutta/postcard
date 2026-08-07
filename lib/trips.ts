@@ -7,8 +7,10 @@ import {
   TimelineItem,
 } from '@/lib/database.types';
 import { fetchTripPhotos, groupPhotosByDay } from '@/lib/photos';
+import { getCoordinatesForTrip, resolveCoordinates } from '@/lib/geo';
 import { supabase } from '@/lib/supabase';
 import { uploadImageToBucket } from '@/lib/storage';
+import { MapPin } from '@/lib/database.types';
 
 export type CreateTripInput = {
   destination: string;
@@ -17,6 +19,9 @@ export type CreateTripInput = {
   endDate?: string;
   description?: string;
   coverPhotoUri?: string;
+  coverPhotoUrl?: string;
+  latitude?: number;
+  longitude?: number;
   createdBy: string;
 };
 
@@ -47,22 +52,25 @@ export async function fetchTrips(): Promise<TripWithStats[]> {
 
   const tripIds = trips.map((t) => t.id);
 
-  const [{ data: members }, { data: journals }] = await Promise.all([
+  const [{ data: members }, { data: journals }, { data: photos }] = await Promise.all([
     supabase
       .from('trip_members')
       .select('*, profile:profiles(*)')
       .in('trip_id', tripIds),
     supabase.from('journal_entries').select('trip_id').in('trip_id', tripIds),
+    supabase.from('trip_photos').select('trip_id').in('trip_id', tripIds),
   ]);
 
   return (trips as Trip[]).map((trip) => {
     const tripMembers = (members ?? []).filter((m) => m.trip_id === trip.id) as TripMember[];
     const journalCount = (journals ?? []).filter((j) => j.trip_id === trip.id).length;
+    const photoCount = (photos ?? []).filter((p) => p.trip_id === trip.id).length;
 
     return {
       ...trip,
       member_count: tripMembers.length,
       journal_count: journalCount,
+      photo_count: photoCount,
       members: tripMembers.map((m) => ({
         ...m,
         profile: m.profile as unknown as Profile,
@@ -81,12 +89,13 @@ export async function fetchTrip(tripId: string): Promise<TripWithStats | null> {
   if (error) throw new Error(error.message);
   if (!trip) return null;
 
-  const [{ data: members }, { data: journals }] = await Promise.all([
+  const [{ data: members }, { data: journals }, { data: photos }] = await Promise.all([
     supabase
       .from('trip_members')
       .select('*, profile:profiles(*)')
       .eq('trip_id', tripId),
     supabase.from('journal_entries').select('id').eq('trip_id', tripId),
+    supabase.from('trip_photos').select('id').eq('trip_id', tripId),
   ]);
 
   const tripMembers = (members ?? []) as TripMember[];
@@ -95,6 +104,7 @@ export async function fetchTrip(tripId: string): Promise<TripWithStats | null> {
     ...(trip as Trip),
     member_count: tripMembers.length,
     journal_count: journals?.length ?? 0,
+    photo_count: photos?.length ?? 0,
     members: tripMembers.map((m) => ({
       ...m,
       profile: m.profile as unknown as Profile,
@@ -103,11 +113,16 @@ export async function fetchTrip(tripId: string): Promise<TripWithStats | null> {
 }
 
 export async function createTrip(input: CreateTripInput): Promise<Trip> {
-  let coverPhotoUrl: string | null = null;
+  let coverPhotoUrl: string | null = input.coverPhotoUrl ?? null;
 
-  if (input.coverPhotoUri) {
+  if (input.coverPhotoUri && !coverPhotoUrl) {
     coverPhotoUrl = await uploadCoverPhoto(input.createdBy, input.coverPhotoUri);
   }
+
+  const coords =
+    input.latitude != null && input.longitude != null
+      ? { latitude: input.latitude, longitude: input.longitude }
+      : resolveCoordinates(input.destination, input.country);
 
   const { data, error } = await supabase
     .from('trips')
@@ -118,6 +133,8 @@ export async function createTrip(input: CreateTripInput): Promise<Trip> {
       end_date: input.endDate || null,
       description: input.description?.trim() || null,
       cover_photo_url: coverPhotoUrl,
+      latitude: coords?.latitude ?? null,
+      longitude: coords?.longitude ?? null,
       created_by: input.createdBy,
     })
     .select()
@@ -134,6 +151,32 @@ export async function updateTrip(tripId: string, userId: string, input: UpdateTr
     coverPhotoUrl = (await uploadCoverPhoto(userId, input.coverPhotoUri)) ?? undefined;
   }
 
+  let coordsUpdate: { latitude: number | null; longitude: number | null } | undefined;
+
+  if (input.destination !== undefined || input.country !== undefined) {
+    let destination = input.destination?.trim();
+    let country = input.country !== undefined ? input.country?.trim() || null : undefined;
+
+    if (destination === undefined || country === undefined) {
+      const { data: existing, error: fetchError } = await supabase
+        .from('trips')
+        .select('destination, country')
+        .eq('id', tripId)
+        .single();
+
+      if (fetchError) throw new Error(fetchError.message);
+
+      if (destination === undefined) destination = existing.destination;
+      if (country === undefined) country = existing.country;
+    }
+
+    const coords = resolveCoordinates(destination ?? '', country);
+    coordsUpdate = {
+      latitude: coords?.latitude ?? null,
+      longitude: coords?.longitude ?? null,
+    };
+  }
+
   const { data, error } = await supabase
     .from('trips')
     .update({
@@ -143,6 +186,10 @@ export async function updateTrip(tripId: string, userId: string, input: UpdateTr
       ...(input.endDate !== undefined && { end_date: input.endDate || null }),
       ...(input.description !== undefined && { description: input.description?.trim() || null }),
       ...(coverPhotoUrl && { cover_photo_url: coverPhotoUrl }),
+      ...(coordsUpdate && {
+        latitude: coordsUpdate.latitude,
+        longitude: coordsUpdate.longitude,
+      }),
     })
     .eq('id', tripId)
     .select()
@@ -271,13 +318,26 @@ export async function fetchTimeline(): Promise<TimelineItem[]> {
   return items.sort((a, b) => b.date.localeCompare(a.date));
 }
 
-export async function fetchMapTrips(): Promise<Trip[]> {
+export async function fetchMapPins(): Promise<MapPin[]> {
   const { data, error } = await supabase
     .from('trips')
     .select('*')
-    .not('country', 'is', null)
-    .order('start_date', { ascending: false });
+    .order('start_date', { ascending: false, nullsFirst: false });
 
   if (error) throw new Error(error.message);
-  return (data ?? []) as Trip[];
+
+  const pins: MapPin[] = [];
+
+  for (const trip of (data ?? []) as Trip[]) {
+    const coords = getCoordinatesForTrip(trip);
+    if (!coords) continue;
+
+    pins.push({
+      trip,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    });
+  }
+
+  return pins;
 }

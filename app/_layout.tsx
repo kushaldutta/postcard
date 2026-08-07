@@ -69,6 +69,22 @@ function RootNavigator() {
             headerShown: true,
           }}
         />
+        <Stack.Screen
+          name="bucket-list/new"
+          options={{
+            presentation: 'modal',
+            title: 'Dream Destination',
+            headerShown: true,
+          }}
+        />
+        <Stack.Screen
+          name="bucket-list/edit/[id]"
+          options={{
+            presentation: 'modal',
+            title: 'Edit Destination',
+            headerShown: true,
+          }}
+        />
       </Stack>
     </>
   );

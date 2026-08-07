@@ -14,78 +14,51 @@ import {
   View,
 } from 'react-native';
 
+import { BucketListCategoryPicker } from '@/components/ui/BucketListCategoryPicker';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
-import { fetchTrip, updateTrip, deleteTrip } from '@/lib/trips';
+import {
+  createTripFromBucketListItem,
+  deleteBucketListItem,
+  fetchBucketListItem,
+  updateBucketListItem,
+} from '@/lib/bucket-list';
+import { BucketListCategory } from '@/lib/database.types';
 
-// Parse common date formats into YYYY-MM-DD for Postgres.
-function parseToISODate(input: string): string | undefined {
-  const s = input.trim();
-  if (!s) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  const parts = s.split(/[-\/]/);
-  if (parts.length === 3) {
-    const [a, b, c] = parts.map(Number);
-    if (c > 1000) {
-      const d2 = new Date(c, a - 1, b);
-      if (!isNaN(d2.getTime())) {
-        return `${c}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`;
-      }
-    }
-  }
-  return undefined;
-}
-
-export default function EditTripScreen() {
+export default function EditBucketListItemScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const router = useRouter();
 
-  const [loadingTrip, setLoadingTrip] = useState(true);
-
+  const [loadingItem, setLoadingItem] = useState(true);
   const [destination, setDestination] = useState('');
   const [country, setCountry] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [description, setDescription] = useState('');
-  // URI of a newly picked local photo (null = keep existing)
+  const [category, setCategory] = useState<BucketListCategory>('getaway');
+  const [whyWeWantToGo, setWhyWeWantToGo] = useState('');
+  const [notes, setNotes] = useState('');
   const [newCoverPhotoUri, setNewCoverPhotoUri] = useState<string | null>(null);
-  // The current remote cover photo URL from the DB
   const [existingCoverUrl, setExistingCoverUrl] = useState<string | null>(null);
-
   const [saving, setSaving] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [isOwner, setIsOwner] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    if (!user) {
-      setLoadingTrip(false);
-      return;
-    }
-    fetchTrip(id)
-      .then((trip) => {
-        if (!trip) return;
-        setDestination(trip.destination);
-        setCountry(trip.country ?? '');
-        setStartDate(trip.start_date ?? '');
-        setEndDate(trip.end_date ?? '');
-        setDescription(trip.description ?? '');
-        setExistingCoverUrl(trip.cover_photo_url);
-        setIsOwner(trip.members.some((m) => m.user_id === user.id && m.role === 'owner'));
+    fetchBucketListItem(id)
+      .then((item) => {
+        if (!item) return;
+        setDestination(item.destination);
+        setCountry(item.country ?? '');
+        setCategory(item.category ?? 'getaway');
+        setWhyWeWantToGo(item.why_we_want_to_go ?? '');
+        setNotes(item.notes ?? '');
+        setExistingCoverUrl(item.cover_photo_url);
       })
-      .finally(() => setLoadingTrip(false));
-  }, [id, user]);
+      .finally(() => setLoadingItem(false));
+  }, [id]);
 
   const pickCoverPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -113,20 +86,43 @@ export default function EditTripScreen() {
     setError(null);
 
     try {
-      await updateTrip(id, user.id, {
+      await updateBucketListItem(id, user.id, {
         destination,
         country,
-        startDate: parseToISODate(startDate),
-        endDate: parseToISODate(endDate),
-        description,
+        category,
+        whyWeWantToGo,
+        notes,
         coverPhotoUri: newCoverPhotoUri ?? undefined,
       });
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save changes');
-      Alert.alert('Save failed', err instanceof Error ? err.message : 'Could not save changes');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleStartPlanning = async () => {
+    if (!user || !id) return;
+
+    setPlanning(true);
+    setError(null);
+
+    try {
+      const item = await fetchBucketListItem(id);
+      if (!item) {
+        throw new Error('Destination not found');
+      }
+
+      const trip = await createTripFromBucketListItem(item, user.id);
+      router.replace(`/trip/${trip.id}`);
+    } catch (err) {
+      Alert.alert(
+        'Could not start trip',
+        err instanceof Error ? err.message : 'Something went wrong'
+      );
+    } finally {
+      setPlanning(false);
     }
   };
 
@@ -134,20 +130,20 @@ export default function EditTripScreen() {
     if (!id) return;
 
     Alert.alert(
-      'Delete trip',
-      'This will permanently remove the trip and all its photos and journal entries.',
+      'Remove destination',
+      'Take this off your bucket list?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Remove',
           style: 'destructive',
           onPress: async () => {
             setDeleting(true);
             try {
-              await deleteTrip(id);
-              router.replace('/(tabs)');
+              await deleteBucketListItem(id);
+              router.back();
             } catch (err) {
-              Alert.alert('Error', err instanceof Error ? err.message : 'Could not delete trip');
+              Alert.alert('Error', err instanceof Error ? err.message : 'Could not remove');
             } finally {
               setDeleting(false);
             }
@@ -157,7 +153,7 @@ export default function EditTripScreen() {
     );
   };
 
-  if (loadingTrip) {
+  if (loadingItem) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={theme.colors.accent} />
@@ -174,8 +170,6 @@ export default function EditTripScreen() {
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled">
-        <Text style={styles.intro}>Update the details for this trip.</Text>
-
         <Pressable onPress={pickCoverPhoto} style={styles.coverPicker}>
           {coverPreviewUri ? (
             <>
@@ -191,43 +185,39 @@ export default function EditTripScreen() {
           ) : (
             <View style={styles.coverPlaceholder}>
               <Text style={styles.coverEmoji}>📷</Text>
-              <Text style={styles.coverLabel}>Add a cover photo</Text>
+              <Text style={styles.coverLabel}>Add an inspiration photo</Text>
             </View>
           )}
         </Pressable>
 
         <View style={styles.form}>
+          <BucketListCategoryPicker value={category} onChange={setCategory} />
           <Input
             label="Destination *"
             value={destination}
             onChangeText={setDestination}
-            placeholder="Madrid"
+            placeholder="Japan"
           />
           <Input
             label="Country"
             value={country}
             onChangeText={setCountry}
-            placeholder="Spain"
+            placeholder="Japan"
           />
           <Input
-            label="Start date"
-            value={startDate}
-            onChangeText={setStartDate}
-            placeholder="3/22/2026 or 2026-03-22"
-            autoCapitalize="none"
+            label="Why we want to go"
+            value={whyWeWantToGo}
+            onChangeText={setWhyWeWantToGo}
+            placeholder="Cherry blossoms, Kyoto temples, authentic ramen..."
+            multiline
+            numberOfLines={3}
+            style={styles.textArea}
           />
           <Input
-            label="End date"
-            value={endDate}
-            onChangeText={setEndDate}
-            placeholder="3/29/2026 or 2026-03-29"
-            autoCapitalize="none"
-          />
-          <Input
-            label="Description"
-            value={description}
-            onChangeText={setDescription}
-            placeholder="A few words about this trip..."
+            label="Notes"
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Best time to visit, things to do, travel tips..."
             multiline
             numberOfLines={3}
             style={styles.textArea}
@@ -236,16 +226,20 @@ export default function EditTripScreen() {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        <Button
+          title="Start Planning"
+          onPress={handleStartPlanning}
+          loading={planning}
+          fullWidth
+        />
         <Button title="Save Changes" onPress={handleSave} loading={saving} fullWidth />
-        {isOwner ? (
-          <Button
-            title="Delete Trip"
-            variant="danger"
-            onPress={handleDelete}
-            loading={deleting}
-            fullWidth
-          />
-        ) : null}
+        <Button
+          title="Remove from Bucket List"
+          variant="danger"
+          onPress={handleDelete}
+          loading={deleting}
+          fullWidth
+        />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -267,14 +261,8 @@ const styles = StyleSheet.create({
     gap: theme.spacing.lg,
     paddingBottom: theme.spacing.xxl,
   },
-  intro: {
-    fontFamily: theme.fonts.body,
-    fontSize: 15,
-    color: theme.colors.textMuted,
-    lineHeight: 22,
-  },
   coverPicker: {
-    height: 180,
+    height: 160,
     borderRadius: theme.radius.lg,
     overflow: 'hidden',
     borderWidth: 1,

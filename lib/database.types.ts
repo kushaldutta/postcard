@@ -40,11 +40,14 @@ export type JournalEntry = {
   profile?: Profile;
 };
 
+export type BucketListCategory = 'day_activity' | 'getaway' | 'international';
+
 export type BucketListItem = {
   id: string;
   user_id: string;
   destination: string;
   country: string | null;
+  category: BucketListCategory;
   notes: string | null;
   why_we_want_to_go: string | null;
   cover_photo_url: string | null;
@@ -72,7 +75,14 @@ export type PhotoDayGroup = {
 export type TripWithStats = Trip & {
   member_count: number;
   journal_count: number;
+  photo_count: number;
   members: TripMember[];
+};
+
+export type MapPin = {
+  trip: Trip;
+  latitude: number;
+  longitude: number;
 };
 
 export type TimelineItem = {

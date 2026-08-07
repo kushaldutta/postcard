@@ -178,6 +178,13 @@ export default function TripDetailScreen() {
             <Pressable onPress={() => router.back()} style={styles.backButton}>
               <Text style={styles.backText}>← Back</Text>
             </Pressable>
+            {isOwner ? (
+              <Pressable
+                onPress={() => router.push(`/trip/edit/${trip.id}`)}
+                style={styles.backButton}>
+                <Text style={styles.backText}>Edit</Text>
+              </Pressable>
+            ) : null}
           </SafeAreaView>
 
           <View style={styles.heroContent}>
@@ -411,6 +418,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     paddingHorizontal: theme.spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   backButton: {
     alignSelf: 'flex-start',

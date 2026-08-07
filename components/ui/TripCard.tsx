@@ -46,6 +46,9 @@ export function TripCard({ trip, onPress, onEdit }: TripCardProps) {
         <View style={styles.metaRow}>
           <Text style={styles.meta}>
             {trip.journal_count} {trip.journal_count === 1 ? 'memory' : 'memories'}
+            {trip.photo_count > 0
+              ? ` · ${trip.photo_count} ${trip.photo_count === 1 ? 'photo' : 'photos'}`
+              : ''}
           </Text>
           <View style={styles.avatars}>
             {trip.members.slice(0, 3).map((member) => (
